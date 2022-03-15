@@ -1,0 +1,500 @@
+#coding:utf-8
+from tkinter import ttk
+import tkinter
+from dbfread import DBF
+import glob,pickle,json
+import os,re,time
+from tkinter import filedialog
+from tkinter import messagebox
+from tkinter.ttk import Progressbar
+import threading
+class Dis_view(object):
+    def __init__(self,master,file_path):
+        self.master = master
+        self.master.columnconfigure(0,weight=1)
+        self.master.rowconfigure(0, weight=1)
+        self.frame_one=ttk.Frame(self.master,padding=(5,5,5,5))
+        self.frame_one.columnconfigure(0,weight=1)
+        self.frame_one.columnconfigure(1, weight=17)
+
+        for x in range(13):
+            self.frame_one.rowconfigure(x, weight=1)
+        self.frame_one.grid(stick="e" + "n" + "s" + "w")
+        self.file_path = file_path
+        self.fs = glob.glob(self.file_path)
+        self.active = []
+        self.message_ws,self.message_gc,self.message_sb,self.message_ph,self.message_wt,self.message_rs,self.message_all=[],[],[],[],[],[],[]       #回调存放
+
+        self.max_column_num=[]
+
+        self.mymenu=MyMenu_class(self.master,self.active)    #
+
+        self.butt1=ttk.Button(self.frame_one, text="文书",command=self.create_tree_ws,width=15)
+        self.butt1.grid(row=0,column=0,ipadx=5,ipady=5,pady=5)
+        self.butt2 = ttk.Button(self.frame_one, text="工程/设备文件级", command=self.create_tree_gc,width=15)
+        self.butt2.grid(row=1, column=0,ipadx=5,ipady=5,pady=5)
+        self.butt3 = ttk.Button(self.frame_one, text="设备/工程2", command=self.create_tree_sb,width=15)
+        self.butt3.grid(row=2, column=0,ipadx=5,ipady=5,pady=5)
+        self.butt4 = ttk.Button(self.frame_one, text="照片", command=self.create_tree_photo,width=15)
+        self.butt4.grid(row=3, column=0,ipadx=5,ipady=5,pady=5)
+        self.butt5 = ttk.Button(self.frame_one, text="人事", command=self.create_tree_rens,width=15)
+        self.butt5.grid(row=4, column=0,ipadx=5,ipady=5,pady=5)
+        self.butt6 = ttk.Button(self.frame_one, text="全功能混合模式", command=self.create_tree_all,width=15)
+        self.butt6.grid(row=5, column=0,ipadx=5,ipady=5,pady=5)
+
+        self.timelab_var = tkinter.Variable()
+        self.timelab = tkinter.Label(self.frame_one, textvariable=self.timelab_var)
+        self.timelab_var.set(time.strftime("%H:%M", time.localtime(time.time())))
+        self.timelab.grid(row=6,column=0,pady=5)
+
+        self.namelbl = tkinter.Label(self.frame_one, text="当前模式:  ")
+        self.namelbl.grid(row=7, column=0,pady=2)
+        self.lab = tkinter.Variable()  #
+        self.lab.set("混合模式")
+        self.namelbl = tkinter.Label(self.frame_one, textvariable=self.lab, fg="red")
+        self.namelbl.grid(row=8, column=0)
+
+        self.var_entry=tkinter.Variable()
+        self.var_entry.set("输入查询关键字")
+        self.entry=tkinter.Entry(self.frame_one,textvariable=self.var_entry,font=("Arial Bold",11))
+        self.entry.bind("<Return>",self.add_eve_ent,)
+        self.entry.grid(row=9,column=0,pady=2)
+        style = ttk.Style()
+        style.map("C.TButton",
+                  foreground=[('pressed', 'red'), ('active', 'blue')],
+                  background=[('pressed', '!disabled', 'black'), ('active', 'white'),])
+        butt=ttk.Button(self.frame_one,text="点我查询",style="C.TButton",command=self.find)
+        butt.grid(row=10,column=0,pady=2)
+        butt.bind("<Button-1>",self.clear_event )
+        self.var_second=tkinter.Variable()
+        self.entry_sencond=tkinter.Entry(self.frame_one,textvariable=self.var_second,font=("Arial Bold",11),background="lavender")
+        self.var_second.set("二级搜索")
+        self.entry_sencond.bind("<Return>", self.add_eve_ent_sencond)
+        self.entry_sencond.grid(row=11,column=0,pady=2)
+        butt_second = ttk.Button(self.frame_one, text="二级搜索", style="C.TButton", command=self.find_second)  ##
+        butt_second.grid(row=12,column=0,pady=2)
+
+
+
+             #
+
+        self.text = tkinter.Text(self.frame_one,height=1)  #
+        self.text.grid(row=12, column=1,sticky="w"+"e"+"n") #
+        self.insert_botom_text("扫描所有以(.dbf)为后缀名的文件", self.text)
+
+
+
+
+
+        self.tree_ws_columns ={"DH":"档号", "WH":"文号", "ZRZ":"责任者", "TM":"题名",
+                               "CWRQ":"成文日期", "BZ":"备注","ZTSL":"页数", "BGQX":"期限",
+                               "QWBS":"QWBS", "ZBBM":"ZBBM", "ZZJGDM":"ZZJGDM"}
+        self.tree_ws_columns_aa = {"DH": "档号", "WH": "文号", "ZRZ": "责任者", "TM": "题名",
+                                "CWRQ": "成文日期", "BZ": "备注", "ZTSL": "页数", "BGQX": "期限"}
+        self.tree_gc_columns = ('DH', 'YS', 'WH', 'ZRZ', 'TM', 'CWRQ', 'BZ', 'LSH', 'ZBJG', 'QWBS')#
+        self.tree_sb_columns = ('GDRQ', 'TM', 'DH', 'FS', 'YS', 'BZDW', 'BZRQ', 'MJ', 'BGQX', 'BZ')#
+        self.tree_photo_columns = ('DH', 'TM', 'CWRQ', 'BZ', 'QWBS')#
+        self.tree_wt_columns=('DH', 'LX', 'SLDW', 'TM', 'ZRZ', 'CWRQ', 'QWBS', 'BZ')#
+        self.tree_rs_columns=('DH', 'XM', 'CYM', 'XB', 'HM', 'JG', 'QWBS', 'BZ')#
+        self.tree_all_column=()
+
+        self.create_tree()#
+        self.explain = tkinter.Text(self.frame_one)  #
+        self.explain.insert(tkinter.INSERT, "\n本程序用于从>=1个以.dbf为后缀名的文件中提取数据，查询与输入的关键字匹配的数据。\n\n"
+                                            "首次使用会要求用户选择放置dbf的文件夹(例如：所有dbf文件放置在d:\dbf_file文件夹中，选到d:\dbf_file即可)，下次使用会自动从该文件夹读取匹配数据。\n\n"
+                                            "扫描模式分档案专用的几个模式与通用模式，默认通用模式。\n  1、通用模式忽略dbf文件内置索引，查找所有与关键字匹配数据。\n"
+                                            "  2、一级搜索忽略空格(例如：“基础原理”与“基础    原理”)索引效果相同。\n"
+                                            "  3、一级搜索的“或”功能(例如输入：“基础@原理@regular”)搜索出含有“基础”或者“原理”或者“regular“关键词的数据。\n"
+                                            "  4、一级搜索上什么也不输入，并消除提示字，显示全部dbf数据。\n"
+                                            "  5、二级搜索在一级搜索显示数据的基础上继续查找。\n"
+                                            
+                                            
+                                            "    请勿商用，       巡山小妖", "taggg")
+        self.explain.grid(row=0, column=1,rowspan=12,stick="s"+"e"+"n"+"w")
+        self.explain.tag_config("taggg", font=20, )
+
+        #self.master.iconbitmap(r'.\aa.ico')
+        self.update_time()
+
+        self.master.mainloop()
+    #
+    def update_time(self):
+        self.timelab_var.set(time.strftime("%H:%M", time.localtime(time.time())))
+        self.master.after(10000,self.update_time)
+    def create_tree(self):
+
+        self.tree = ttk.Treeview(self.frame_one, show="headings")
+        self.tree.grid(row=0, column=1, rowspan=12,sticky="n"+"s")
+        self.scroll = tkinter.Scrollbar(self.master)
+        self.scroll.config(command=self.tree.yview)
+        self.scroll.grid(row=0,column=2,sticky="e"+"s"+"n"+"w")
+        self.scroll_x = tkinter.Scrollbar(self.master,orient = tkinter.HORIZONTAL)
+        self.scroll_x.config(command=self.tree.xview)
+        self.scroll_x.grid(column=0,sticky="e"+"s"+"n"+"w")
+        self.tree.config(yscrollcommand=self.scroll.set,xscrollcommand=self.scroll_x.set)
+
+        self.tree.bind("<Button-3>", self.rr_func)
+        self.tree.bind("<Double-Button-1>", self.func)
+
+
+
+
+        self.menu1 = tkinter.Menu(self.mymenu.mymen, tearoff=False)
+        self.mouse_right = tkinter.Menu(self.mymenu.mymen, tearoff=False)#
+        self.mouse_right.add_cascade(label="被封印了，因为没冲会员",command=self.right_command)
+        self.tree["columns"] = self.tree_all_column
+
+        for item in ["文书", "工程/设备文件级", "设备/工程2", "照片", "人事", "全功能混合模式"]:  #
+            if item == "文书":
+                self.menu1.add_command(label=item, command=self.create_tree_ws)
+            if item == "工程/设备文件级":
+                self.menu1.add_command(label=item, command=self.create_tree_gc)
+            if item == "设备/工程2":
+                self.menu1.add_command(label=item, command=self.create_tree_sb)
+            if item == "照片":
+                self.menu1.add_command(label=item, command=self.create_tree_photo)
+            if item == "人事":
+                self.menu1.add_command(label=item, command=self.create_tree_rens)
+            if item == "全功能混合模式":
+                self.menu1.add_separator()#分割线功能
+                self.menu1.add_command(label=item, command=self.create_tree_all)
+        self.mymenu.mymen.add_cascade(label="按档案类型显示", menu=self.menu1)
+    def right_command(self):
+        pass
+    def create_tree_ws(self):#文书
+        self.lab.set("文书档案")
+        self.clear_dis()
+        self.tree["columns"] = tuple(self.tree_ws_columns_aa.keys())
+        for ke,va in self.tree_ws_columns_aa.items():
+                self.tree.column(ke,anchor=tkinter.CENTER)#
+                self.tree.heading(ke, text=va)
+        self.insert_botom_text("文书模式", self.text)
+        self.insert_buffer(self.message_ws)
+        self.tree_v(self.tree)
+    def insert_buffer(self,data_li):
+
+        if list(data_li) !=[]:
+            for i in data_li:
+                self.tree.insert("",tkinter.END,text="row",values=i)
+        count = len(self.tree.get_children())
+
+        if count !=0:
+            self.text.delete(0.1,tkinter.END)
+            self.text.insert(tkinter.INSERT, "%d个匹配对象" % count, "tags")
+            self.text.tag_config("tags", foreground="magenta", justify=tkinter.CENTER)
+
+    def insert_botom_text(self,message,text):
+        text.insert(tkinter.INSERT, message, "tag")
+        text.tag_config("tag", foreground="red", justify=tkinter.CENTER)
+        #text.update()
+    def create_tree_gc(self):                                                   #
+        self.lab.set("工程/设备文件级")                                             #
+        self.create_coiunm_atv(self.tree_gc_columns)                             #
+        self.insert_botom_text("没什么好说的......", self.text)
+        self.insert_buffer(self.message_gc)                                     #包
+        self.tree_v(self.tree)                                                   #t
+    def create_tree_sb(self):##               #
+        self.lab.set("工程/设备")                              #
+        self.create_coiunm_atv(self.tree_sb_columns)
+        self.insert_botom_text("适用工程与设备的案卷级档案查询", self.text)
+        self.insert_buffer(set(self.message_sb))
+        self.tree_v(self.tree)
+    def create_tree_photo(self):#
+        self.lab.set("照片")
+        self.create_coiunm_atv(self.tree_photo_columns)
+        self.insert_botom_text("适用照片档案查询", self.text)
+        self.insert_buffer(self.message_ph)
+        self.tree_v(self.tree)
+    def create_tree_rens(self):#
+        self.lab.set("人事")
+        self.create_coiunm_atv(self.tree_rs_columns)
+        self.insert_botom_text("适用档案人事查询", self.text)
+        self.insert_buffer(self.message_rs)
+        self.tree_v(self.tree)
+    def create_tree_all(self):#
+        self.lab.set("混合模式")
+        self.create_coiunm_atv(self.tree_all_column)
+        self.insert_botom_text("扫描所有以(.dbf)为后缀名的文件", self.text)
+        if self.max_column_num !=[]:                                                 #1处改
+            self.tree["columns"] = tuple(range(max(self.max_column_num)))
+            for da in list(range(max(self.max_column_num))):
+                self.tree.column(da, anchor=tkinter.CENTER)
+                self.tree.heading(da, text=da)
+
+
+        self.insert_buffer(self.message_all)
+        self.tree_v(self.tree)
+    def create_coiunm_atv(self,tuple_name):#
+        self.clear_dis()
+        self.tree["columns"] = tuple_name
+        for item in tuple_name:
+            self.tree.column(item,anchor=tkinter.CENTER)
+            self.tree.heading(item, text=item)
+    def rr_func(self,event):#
+        self.data_id = self.tree.identify_row(event.y)
+        if self.data_id:   #
+            self.tree.selection_set(self.data_id)   #
+            self.mouse_right.post(event.x_root, event.y_root)#
+            print(event.x_root)
+        else:
+            pass
+        print(self.tree.item(self.tree.identify_element(event.x_root,event.y_root)))
+    def find_second(self):
+        if self.active==["1"]:
+            self.active.clear()
+        s_li=[]
+        len_item=len(self.tree.get_children())
+        for i in self.tree.get_children():
+            s_li.append(self.tree.item(i)["values"])#
+        self.clear_dis()
+        search_message=self.var_second.get()
+        for item in s_li:
+            if search_message in (str(item).strip("[,]").replace("'",'').replace(' ','').replace(",",'')):
+                self.tree.insert("", tkinter.END, text="row", values=item)
+        count=len(self.tree.get_children())
+        self.sum2(count,self.text,len_item)
+        self.tree_v(self.tree)
+
+    def clear_dis(self):
+        if self.explain:
+            self.explain.destroy()
+        items = self.tree.get_children()
+        for item in items:
+            self.tree.delete(item)
+        if self.text:
+            self.text.delete(0.1, tkinter.END)
+
+    def add_eve_ent(self,event):
+        self.clear_event(event)
+        self.find()
+
+    def add_eve_ent_sencond(self,event):
+        self.find_second()
+
+    def clear_event(self,event):
+        if self.explain:
+            self.explain.destroy()
+        colu=[]  #临时的
+        items=self.tree.get_children()
+        for item in items:
+            self.tree.delete(item)
+        self.text.delete(0.1,tkinter.END)
+        if self.tree["columns"]==tuple(self.tree_ws_columns_aa.keys()):
+            self.message_ws.clear()
+        elif self.tree["columns"]==self.tree_gc_columns:
+            self.message_gc.clear()
+        elif self.tree["columns"] == self.tree_sb_columns:
+            self.message_sb.clear()
+        elif self.tree["columns"] == self.tree_photo_columns:
+            self.message_ph.clear()
+        elif self.tree["columns"] == self.tree_wt_columns:
+            self.message_wt.clear()
+        elif self.tree["columns"] == self.tree_rs_columns:
+            self.message_rs.clear()
+        if self.max_column_num:   #True
+            colu=[str(x) for x in range(max(self.max_column_num))]
+        if self.tree["columns"] == tuple(colu):
+            self.message_all.clear()
+        colu.clear()
+    def func(self,event):
+        mes=''
+        item=event.widget.selection()
+        x=self.tree.item(item)["values"]
+        for it in x:
+            if it =='':
+                pass
+            else:
+                mes+=str(it)+"\n"
+        PopMessage(self.master,mes)
+
+    def find(self):
+        mess = self.entry.get()
+        if self.fs==[] and self.active==[] :
+            self.text.insert(tkinter.INSERT, "您必须设置dbf文件夹路径!!!","tag")
+            self.text.tag_config("tag",foreground="red",justify=tkinter.CENTER)
+            self.mymenu.func()
+            self.fs = glob.glob(str(self.mymenu.filepath).strip("[']").replace("'", ''))
+            self.active.clear()
+            return -1       #
+
+        aa=[]
+        path = os.path.join(os.getcwd(), "path_save.json")
+        try:
+            with open(path, "r") as f:
+
+                file_path_after=json.load(f)
+        except :
+            pass
+        self.fs = glob.glob((file_path_after))
+
+        for one_file_path in self.fs:
+            try:
+                files = DBF(one_file_path, encoding='gbk', char_decode_errors='ignore')#
+            except:
+                pass
+            else:
+                for file in files:
+                    if self.tree["columns"]==tuple(self.tree_ws_columns_aa.keys()) and file.keys()==self.tree_ws_columns.keys():
+                        self.return_file(file)
+                        self.choose_insert_tree_data(self.tree,file,mess,aa,save_mes_li=self.message_ws)
+                    elif self.tree["columns"]==self.tree_gc_columns and  tuple(file.keys())==self.tree_gc_columns:
+                        self.choose_insert_tree_data(self.tree, file,mess,aa,save_mes_li=self.message_gc)
+                    elif self.tree["columns"]==self.tree_sb_columns  and tuple(file.keys())==self.tree_sb_columns:#
+                        self.choose_insert_tree_data(self.tree, file,mess,aa,save_mes_li=self.message_sb)
+                    elif self.tree["columns"]==self.tree_rs_columns and tuple(file.keys())==self.tree_rs_columns:#
+                        self.choose_insert_tree_data(self.tree, file,mess,aa,save_mes_li=self.message_rs)
+                    elif self.tree["columns"]==self.tree_photo_columns and tuple(file.keys())==self.tree_photo_columns:#提取
+                        self.choose_insert_tree_data(self.tree, file, mess, aa,save_mes_li=self.message_ph)
+
+                    elif self.tree["columns"] == self.tree_all_column or self.tree["columns"] == ():
+                        if len(file.keys()) not in self.max_column_num:
+                            self.max_column_num.append(len(file.keys()))
+                        self.choose_insert_tree_data(self.tree, file, mess, aa,save_mes_li=self.message_all)
+
+                    if  self.max_column_num !=[]:
+                        if self.tree["columns"] == self.tree_all_column or self.tree["columns"] == tuple(str(x) for x in range(max(self.max_column_num))):
+                            self.choose_insert_tree_data(self.tree, file, mess, aa, save_mes_li=self.message_all)
+            # except:
+            #     pass #错误的话 这里处理  #这里应该弹出一个消息
+
+            aa.clear()
+            self.tree_v(self.tree)
+        if self.tree["columns"]==self.tree_all_column:#
+            self.tree["columns"]=tuple(range(max(self.max_column_num)))
+            for da in list(range(max(self.max_column_num))):
+                self.tree.column(da,anchor=tkinter.CENTER)
+                self.tree.heading(da, text=da)
+
+        num=len(self.tree.get_children())
+
+        self.sum(num,self.text)
+
+    def choose_insert_tree_data(self,tree_data,file,mess,aa,save_mes_li):#select #选择不同colunm name 的dbf插入tree界面
+
+        file_data=tuple(file.values())
+        for ke, val in file.items():
+            for x in ''.join(re.findall(r'\S', mess)).split("@"):
+                #print(x)
+                if x in str(val) and file_data not in aa:
+
+                    aa.append(file_data)
+                    tree_data.insert("", tkinter.END, text="row", values=file_data)
+                    save_mes_li.append(file_data) # 回调
+    def return_mess(self,mess):
+        pass
+    def return_file(self,file):#该函数只??应用
+        del file["QWBS"],file["ZBBM"],file["ZZJGDM"]
+        if file["BGQX"] == "1":
+            file["BGQX"]="永久"
+        elif file["BGQX"] == "9":
+            file["BGQX"]="30年"
+        elif file["BGQX"] == "5":
+            file["BGQX"]="10年"
+    def sum(self,count,text):
+        if count != 0:
+            text.insert(tkinter.INSERT,"查询到%d个结果"%count,"tags")
+            text.tag_config("tags",foreground="magenta",justify=tkinter.CENTER)
+            text.update()
+        elif count==0 and self.fs!=[]:
+            text.insert(tkinter.INSERT, "查询到%d个结果，是不是关键字输错了?(=^_^=)"%count,"tags")
+            text.tag_config("tags",foreground="deeppink",justify=tkinter.CENTER)#dodgerblue
+            text.update()
+    def sum2(self,count,text,l):
+        if count != 0:
+            text.insert(tkinter.INSERT,"查询到%d个结果"%count,"tags")
+            text.tag_config("tags",foreground="magenta",justify=tkinter.CENTER)
+            text.update()
+        elif l==0 :#
+            text.insert(tkinter.INSERT, "您需要先执行一级搜索(=^_^=)","tags") #
+            text.tag_config("tags",foreground="purple",justify=tkinter.CENTER)
+            text.update()
+        elif count==0 and self.fs!=[]:#
+            text.insert(tkinter.INSERT, "查询到%d个结果，是不是关键字输错了?(=^_^=)"%count,"tags")
+            text.tag_config("tags",foreground="deeppink",justify=tkinter.CENTER)#dodgerblue
+            text.update()
+
+    def re(self,file): #
+        self.tree.item(self.tree.get_children())#
+
+    def tree_v(self,tr):
+        items = tr.get_children()
+        for i in range(len(items)):
+            if i % 2 == 0:
+                tr.item(items[i], tags='stye1')
+            else:
+                tr.item(items[i], tags='stye2')
+        tr.tag_configure('stye1',font="黑体")#, background=
+        tr.tag_configure('stye2', background="lavender",font="黑体")#"#ccc"
+
+class PopMessage(object):
+    def __init__(self,master,message):
+        self.master=master
+        self.message=message
+        self.win1 = tkinter.Toplevel(self.master)
+        self.win1.title("详细信息")
+        self.win1.geometry("550x420")
+        self.win1.resizable(height=False, width=False)
+        self.text=tkinter.Text(self.win1,background="lavender",width=100,height=24,font=("Arial Bold",25))
+        self.text.insert(tkinter.INSERT,message,"tags")
+        self.text.tag_config("tags",justify=tkinter.CENTER)
+        self.text.pack()
+
+class MyMenu_class(object):
+    def __init__(self,master,active):
+        self.active=active
+        self.master=master
+        self.mymen=tkinter.Menu(self.master)
+        self.master.config(menu=self.mymen)
+        self.menu=tkinter.Menu(self.mymen,tearoff=False)
+        for item in ["选择", "退出",]:
+            if item == "退出":
+                self.menu.add_separator()
+                self.menu.add_command(label=item, command=self.master.quit)
+            else:
+                self.menu.add_command(label=item, command=self.func)
+
+        self.mymen.add_cascade(label="文件路径", menu=self.menu)
+
+    def func(self):
+        ac=False #判断点
+        self.active.clear() #清除标志位
+        self.filename = filedialog.askdirectory()
+        if self.filename:
+            for item_name in os.listdir(self.filename):
+                if ".dbf" in os.path.basename(item_name):
+                    ac=True
+                    break
+        self.filepath = os.path.join(self.filename, "*.dbf")
+        if ac:
+            with open(os.path.join(os.getcwd(), "path_save.json"), "w") as f:
+                json.dump(self.filepath, f)
+
+                f.flush()
+                f.close()
+                self.active.append("1") #
+        else:
+            messagebox.showerror(message="该文件夹内不包含dbf文件\n请重新选择!")
+def run():
+    path = os.path.join(os.getcwd(), "path_save.json")
+    if not os.path.isfile(path):
+        with(open(path, "w")) as f:
+            f.write("")
+    with open(path, "r") as f:
+        if f:
+            try:
+                file_path =json.load(f)
+                print(file_path)
+            except:
+                file_path=''
+    win=tkinter.Tk()
+    win.title("dbf_search----巡山小妖")
+    screenwidth = win.winfo_screenwidth()
+    screenheight = win.winfo_screenheight()
+    alignstr = '%dx%d+%d+%d' % (1200, 600, (screenwidth - 1200) / 2, (screenheight - 600) / 2)
+    win.geometry(alignstr)
+
+    Dis_view(win,file_path)
+
+if __name__ == '__main__':
+   run()
+
